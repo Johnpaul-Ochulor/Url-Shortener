@@ -4,14 +4,19 @@ import Url from '../models/Url.js';
 
 export const shortenUrl = async (req, res) => {
   // 1. Destructure the new field: expiresAfterDays
-  const { longUrl, customCode, expiresAfterDays } = req.body;
+  const { longUrl, customCode, expiresAfterDays, manualExpirationDate } = req.body;
   const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
-
+  
+  let shortCode;
   // 2. Calculate expiration date if the user provided one
   let expirationDate = null;
-  if (expiresAfterDays) {
-    expirationDate = new Date();
-    expirationDate.setDate(expirationDate.getDate() + expiresAfterDays);
+ if (manualExpirationDate) {
+      // Use the specific date provided by the user (e.g., "2026-12-25")
+      expirationDate = new Date(manualExpirationDate);
+  } else if (expiresAfterDays) {
+      // Use the "Days from now" logic
+      expirationDate = new Date();
+      expirationDate.setDate(expirationDate.getDate() + expiresAfterDays);
   }
 
   // Inside shortenUrl
@@ -47,6 +52,7 @@ if (customCode) {
       originalUrl: longUrl,
       shortCode,
       expiresAt: expirationDate, // <--- New!
+      isActive: true,
       createdAt: new Date()
     });
 
@@ -65,7 +71,11 @@ export const redirectUrl = async (req, res) => {
     const url = await Url.findOne({ shortCode });
 
     if (url) {
-      // 4. Check if the link is expired (Feature 6)
+      // Check if the link is manually deactivated
+      if (!url.isActive) {
+        return res.status(403).json({ error: 'This link has been deactivated by the owner' });
+    }
+      // Check if the link is expired (Feature 6)
       if (url.expiresAt && new Date() > url.expiresAt) {
         return res.status(410).json({ error: 'This link has expired' });
       }

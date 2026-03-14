@@ -33,7 +33,10 @@ const urlSchema = new mongoose.Schema({
     type: Date,
     default: null, // null means it never expires unless set
   },
- 
+  isActive: {
+  type: Boolean,
+  default: true, // Links are active by default
+},
 });
 
 
