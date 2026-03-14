@@ -2,86 +2,113 @@ import { nanoid } from 'nanoid';
 import validUrl from 'valid-url';
 import Url from '../models/Url.js';
 
-/**
- * @desc    Create a short URL from a long URL
- * @route   POST /api/shorten
- */
 export const shortenUrl = async (req, res) => {
-  const { longUrl, customCode } = req.body;
+  // 1. Destructure the new field: expiresAfterDays
+  const { longUrl, customCode, expiresAfterDays } = req.body;
   const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
 
-  // 1. Feature 7: Validate URL format
+  // 2. Calculate expiration date if the user provided one
+  let expirationDate = null;
+  if (expiresAfterDays) {
+    expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + expiresAfterDays);
+  }
+
+  // Inside shortenUrl
+if (customCode) {
+  // Remove spaces and special characters, only allow letters, numbers, and hyphens
+  const sanitizedCode = customCode.replace(/[^a-zA-Z0-9-_]/g, '');
+  
+  // Check if someone else is already using this code
+  const codeExists = await Url.findOne({ shortCode: sanitizedCode });
+  if (codeExists) {
+    return res.status(400).json({ error: 'Custom code already in use' });
+  }
+  shortCode = sanitizedCode;
+}else {
+    // 3. Fallback: If no custom code, generate a random one
+    shortCode = nanoid(6);
+  }
+
   if (!validUrl.isUri(longUrl)) {
     return res.status(401).json({ error: 'Invalid URL provided' });
   }
 
   try {
-    // 2. Feature 4: Duplicate Check (Return existing if found)
     let url = await Url.findOne({ originalUrl: longUrl });
-    if (url) {
-      return res.json({ 
-        message: 'URL already exists', 
-        shortUrl: `${baseUrl}/${url.shortCode}` 
-      });
-    }
+    
+    // If it exists, we return it (Note: old ones will still have null expiresAt)
+    if (url) return res.json(url);
 
-    // 3. Feature 5: Custom Code vs Generated Code Logic
-    let shortCode;
-    if (customCode) {
-      const existingCustom = await Url.findOne({ shortCode: customCode });
-      if (existingCustom) {
-        return res.status(400).json({ error: 'Custom code already in use' });
-      }
-      shortCode = customCode;
-    } else {
-      shortCode = nanoid(6); // Unique 6-character ID
-    }
+    let shortCode = customCode || nanoid(6);
 
-    // 4. Feature 1: Create and Save to local MongoDB
+    // 3. Create new document with expiration and analytics
     url = new Url({
       originalUrl: longUrl,
       shortCode,
+      expiresAt: expirationDate, // <--- New!
       createdAt: new Date()
     });
 
     await url.save();
-
-    res.status(201).json({
-      originalUrl: url.originalUrl,
-      shortCode: url.shortCode,
-      shortUrl: `${baseUrl}/${shortCode}`
-    });
+    res.status(201).json(url);
 
   } catch (err) {
-    console.error('Database Error:', err);
-    res.status(500).json({ error: 'Server error, please try again' });
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
   }
 };
 
-/**
- * @desc    Redirect to original URL and track clicks
- * @route   GET /:shortCode
- */
 export const redirectUrl = async (req, res) => {
   try {
     const { shortCode } = req.params;
-
-    // 1. Feature 2: Search database for matching short code
     const url = await Url.findOne({ shortCode });
 
     if (url) {
-      // 2. Feature 3: Increment click count (Analytics)
+      // 4. Check if the link is expired (Feature 6)
+      if (url.expiresAt && new Date() > url.expiresAt) {
+        return res.status(410).json({ error: 'This link has expired' });
+      }
+
+      // 5. Update click count and last accessed time (Feature 3)
       url.clickCount++;
+      url.lastAccessed = new Date(); 
       await url.save();
 
-      // 3. Perform Redirection
       return res.redirect(url.originalUrl);
     } else {
-      // 4. Feature 7: Handle non-existing short codes
-      return res.status(404).json({ error: 'No URL found for this code' });
+      return res.status(404).json({ error: 'No URL found' });
     }
   } catch (err) {
-    console.error('Redirection Error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+export const deleteUrl = async (req, res) => {
+  try {
+    const { shortCode } = req.params;
+    
+    // This command looks for the code and wipes it from MongoDB
+    const url = await Url.findOneAndDelete({ shortCode });
+
+    if (!url) {
+      // If we try to delete something that doesn't exist
+      return res.status(404).json({ error: 'URL not found' });
+    }
+
+    // Success!
+    res.json({ message: 'URL deleted successfully' });
+  } catch (err) {
+    console.error('Delete Error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+export const getAllUrls = async (req, res) => {
+  try {
+    const urls = await Url.find().sort({ createdAt: -1 }); // Newest first
+    res.json(urls);
+  } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 };
