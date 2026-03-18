@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import validUrl from 'valid-url';
-import Url from '../models/Url.js';
+import Url from '../models/urlModel.js';
 
 export const shortenUrl = async (req, res) => {
   // 1. Destructure the new field: expiresAfterDays
